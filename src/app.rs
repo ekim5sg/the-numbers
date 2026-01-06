@@ -18,7 +18,7 @@ use questions::{
 };
 use storage::{load_grade, load_progress, save_grade, save_progress, Progress};
 use ai_day::{DayResponse, Difficulty as AiDifficulty};
-use stats::{load_stats, record_attempt, save_stats, last_n_days, sum_days};
+use stats::{load_stats, last_n_days, record_attempt, save_stats, sum_days};
 
 use rand::seq::SliceRandom;
 use wasm_bindgen::closure::Closure;
@@ -310,6 +310,30 @@ fn skill_label(s: Skill) -> &'static str {
 }
 
 // ----------------------------
+// Skill badge helpers (🟢🟡🔴) — warning-safe
+// ----------------------------
+
+fn badge_for_pct_i32(pct: i32) -> &'static str {
+    if pct >= 85 {
+        "🟢"
+    } else if pct >= 70 {
+        "🟡"
+    } else {
+        "🔴"
+    }
+}
+
+fn badge_for_accuracy_opt(a: Option<f32>) -> &'static str {
+    match a {
+        None => "⚪",
+        Some(x) => {
+            let pct = (x * 100.0).round() as i32;
+            badge_for_pct_i32(pct)
+        }
+    }
+}
+
+// ----------------------------
 // Clipboard helpers (NO web-sys feature gating)
 // ----------------------------
 
@@ -432,7 +456,8 @@ fn sound_flag(props: &SoundFlagProps) -> Html {
     use_effect_with(props.enabled, move |enabled| {
         if let Some(win) = web_sys::window() {
             if let Ok(Some(storage)) = win.local_storage() {
-                let _ = storage.set_item("the_numbers_sound_v1", if *enabled { "1" } else { "0" });
+                let _ =
+                    storage.set_item("the_numbers_sound_v1", if *enabled { "1" } else { "0" });
             }
         }
         || ()
@@ -442,7 +467,7 @@ fn sound_flag(props: &SoundFlagProps) -> Html {
 }
 
 // ----------------------------
-// Parent Summary (weekly breakdown) ✅ ACTIONABLE + COPY REPORT
+// Parent Summary (weekly breakdown) ✅ ACTIONABLE + COPY REPORT + COPY TEACHER NOTE
 // (MUST be a component to use hooks)
 // ----------------------------
 
@@ -470,16 +495,38 @@ fn parent_summary_panel() -> Html {
 
     let week_attempts = total_attempts_for_week(&totals);
 
-    let copied_toast = use_state(|| false);
+    let copied_weekly_toast = use_state(|| false);
+    let copied_teacher_toast = use_state(|| false);
 
-    // auto-hide copied toast
+    // auto-hide copied weekly toast
     {
-        let copied_toast = copied_toast.clone();
-        use_effect_with(*copied_toast, move |on| {
+        let copied_weekly_toast = copied_weekly_toast.clone();
+        use_effect_with(*copied_weekly_toast, move |on| {
             if *on {
-                let copied_toast2 = copied_toast.clone();
+                let copied_weekly_toast2 = copied_weekly_toast.clone();
                 let cb = Closure::<dyn FnMut()>::new(move || {
-                    copied_toast2.set(false);
+                    copied_weekly_toast2.set(false);
+                });
+                if let Some(win) = web_sys::window() {
+                    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                        cb.as_ref().unchecked_ref(),
+                        1800,
+                    );
+                }
+                cb.forget();
+            }
+            || ()
+        });
+    }
+
+    // auto-hide copied teacher toast
+    {
+        let copied_teacher_toast = copied_teacher_toast.clone();
+        use_effect_with(*copied_teacher_toast, move |on| {
+            if *on {
+                let copied_teacher_toast2 = copied_teacher_toast.clone();
+                let cb = Closure::<dyn FnMut()>::new(move || {
+                    copied_teacher_toast2.set(false);
                 });
                 if let Some(win) = web_sys::window() {
                     let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
@@ -525,28 +572,65 @@ fn parent_summary_panel() -> Html {
     let week_correct = total_correct(&totals);
     let week_pct = pct_label(week_attempts, week_correct);
 
-    // Pull skill stats
-    let skills: Vec<(&'static str, u32, u32, String)> = vec![
-        ("Addition", totals.addition.attempts, totals.addition.correct, pct_label_from(&totals.addition)),
-        ("Subtraction", totals.subtraction.attempts, totals.subtraction.correct, pct_label_from(&totals.subtraction)),
-        ("Multiplication", totals.multiplication.attempts, totals.multiplication.correct, pct_label_from(&totals.multiplication)),
-        ("Division", totals.division.attempts, totals.division.correct, pct_label_from(&totals.division)),
-        ("Word Problems", totals.word.attempts, totals.word.correct, pct_label_from(&totals.word)),
-        ("Mixed Skills", totals.mixed.attempts, totals.mixed.correct, pct_label_from(&totals.mixed)),
+    // Pull skill stats (badge + pct string)
+    let skills: Vec<(&'static str, u32, u32, String, &'static str)> = vec![
+        (
+            "Addition",
+            totals.addition.attempts,
+            totals.addition.correct,
+            pct_label_from(&totals.addition),
+            badge_for_accuracy_opt(totals.addition.accuracy()),
+        ),
+        (
+            "Subtraction",
+            totals.subtraction.attempts,
+            totals.subtraction.correct,
+            pct_label_from(&totals.subtraction),
+            badge_for_accuracy_opt(totals.subtraction.accuracy()),
+        ),
+        (
+            "Multiplication",
+            totals.multiplication.attempts,
+            totals.multiplication.correct,
+            pct_label_from(&totals.multiplication),
+            badge_for_accuracy_opt(totals.multiplication.accuracy()),
+        ),
+        (
+            "Division",
+            totals.division.attempts,
+            totals.division.correct,
+            pct_label_from(&totals.division),
+            badge_for_accuracy_opt(totals.division.accuracy()),
+        ),
+        (
+            "Word Problems",
+            totals.word.attempts,
+            totals.word.correct,
+            pct_label_from(&totals.word),
+            badge_for_accuracy_opt(totals.word.accuracy()),
+        ),
+        (
+            "Mixed Skills",
+            totals.mixed.attempts,
+            totals.mixed.correct,
+            pct_label_from(&totals.mixed),
+            badge_for_accuracy_opt(totals.mixed.accuracy()),
+        ),
     ];
 
-    // Most practiced
-    let most_practiced = {
-        let mut v = skills.clone();
-        v.sort_by(|a, b| b.1.cmp(&a.1));
-        v.into_iter().find(|(_, att, _, _)| *att > 0)
-    };
+    // Most practiced (index into skills so we never move owned Strings)
+    let most_practiced_idx: Option<usize> = skills
+        .iter()
+        .enumerate()
+        .filter(|(_, (_name, att, _cor, _pct_str, _badge))| *att > 0)
+        .max_by_key(|(_, (_name, att, _cor, _pct_str, _badge))| *att)
+        .map(|(i, _)| i);
 
     // Strongest (10+ attempts): highest accuracy
     let strongest = {
         let mut v: Vec<(&'static str, u32, u32, i32)> = skills
             .iter()
-            .filter_map(|(name, att, cor, _)| {
+            .filter_map(|(name, att, cor, _pct_str, _badge)| {
                 if *att >= 10 {
                     let pct = ((*cor as f32) / (*att as f32) * 100.0).round() as i32;
                     Some((*name, *att, *cor, pct))
@@ -563,7 +647,7 @@ fn parent_summary_panel() -> Html {
     let focus = {
         let mut v: Vec<(&'static str, u32, u32, i32)> = skills
             .iter()
-            .filter_map(|(name, att, cor, _)| {
+            .filter_map(|(name, att, cor, _pct_str, _badge)| {
                 if *att >= 10 {
                     let pct = ((*cor as f32) / (*att as f32) * 100.0).round() as i32;
                     Some((*name, *att, *cor, pct))
@@ -616,10 +700,16 @@ fn parent_summary_panel() -> Html {
         .collect();
 
         day_skill_pcts.sort_by(|a, b| b.3.cmp(&a.3));
-        let best = day_skill_pcts.first().map(|(n, _, _, p)| format!("🏅 {} ({}%)", n, p)).unwrap_or_else(|| "—".to_string());
+        let best = day_skill_pcts
+            .first()
+            .map(|(n, _, _, p)| format!("🏅 {} {} ({}%)", badge_for_pct_i32(*p), n, p))
+            .unwrap_or_else(|| "—".to_string());
 
         day_skill_pcts.sort_by(|a, b| a.3.cmp(&b.3));
-        let worst = day_skill_pcts.first().map(|(n, _, _, p)| format!("🎯 {} ({}%)", n, p)).unwrap_or_else(|| "—".to_string());
+        let worst = day_skill_pcts
+            .first()
+            .map(|(n, _, _, p)| format!("🎯 {} {} ({}%)", badge_for_pct_i32(*p), n, p))
+            .unwrap_or_else(|| "—".to_string());
 
         html! {
             <tr style="border-top: 1px solid rgba(0,0,0,.06);">
@@ -632,21 +722,39 @@ fn parent_summary_panel() -> Html {
         }
     });
 
-    // Build plain-text report
+    // Build plain-text weekly report
     let report_text = {
         let mut lines: Vec<String> = vec![];
         lines.push("THE NUMBERS — Weekly Report (Last 7 days)".to_string());
         lines.push(format!("Total: {} attempts • {} accuracy", week_attempts, week_pct));
         lines.push("".to_string());
 
-        if let Some((name, att, cor, _)) = most_practiced {
-            lines.push(format!("Most practiced: {} ({} tries • {})", name, att, pct_label(att, cor)));
+        if let Some(i) = most_practiced_idx {
+            let (name, att, cor, _pct_str, _badge) = &skills[i];
+            lines.push(format!(
+                "Most practiced: {} ({} tries • {})",
+                name,
+                *att,
+                pct_label(*att, *cor)
+            ));
         }
         if let Some((name, att, _cor, pct)) = strongest {
-            lines.push(format!("Strongest (10+ tries): {} ({}% • {} tries)", name, pct, att));
+            lines.push(format!(
+                "Strongest (10+ tries): {} {} ({}% • {} tries)",
+                badge_for_pct_i32(pct),
+                name,
+                pct,
+                att
+            ));
         }
         if let Some((name, att, _cor, pct)) = focus {
-            lines.push(format!("Focus next (10+ tries): {} ({}% • {} tries)", name, pct, att));
+            lines.push(format!(
+                "Focus next (10+ tries): {} {} ({}% • {} tries)",
+                badge_for_pct_i32(pct),
+                name,
+                pct,
+                att
+            ));
             lines.push(format!("2-minute plan: {}", plan_text(name)));
         } else {
             lines.push("Focus next: Balanced week (no clear weak spot with 10+ tries)".to_string());
@@ -654,8 +762,8 @@ fn parent_summary_panel() -> Html {
 
         lines.push("".to_string());
         lines.push("By skill:".to_string());
-        for (name, att, cor, pct) in skills.iter() {
-            lines.push(format!("• {}: {} tries, {} correct ({})", name, att, cor, pct));
+        for (name, att, cor, pct, badge) in skills.iter() {
+            lines.push(format!("• {} {}: {} tries, {} correct ({})", badge, name, att, cor, pct));
         }
 
         lines.push("".to_string());
@@ -670,12 +778,88 @@ fn parent_summary_panel() -> Html {
         lines.join("\n")
     };
 
+    // Build teacher note (copy-friendly)
+    let teacher_note_text = {
+        let g = load_grade();
+        let date_range = if let (Some((start, _)), Some((end, _))) = (last7.first(), last7.last()) {
+            format!("{} → {}", start, end)
+        } else {
+            "Last 7 days".to_string()
+        };
+
+        let mut lines: Vec<String> = vec![];
+        lines.push("Teacher Note — THE NUMBERS".to_string());
+        lines.push(format!("Student level: {}", g.label()));
+        lines.push(format!("Date range: {}", date_range));
+        lines.push("".to_string());
+        lines.push(format!(
+            "Summary: {} practice attempts • {} overall accuracy",
+            week_attempts, week_pct
+        ));
+
+        if let Some(i) = most_practiced_idx {
+            let (name, att, cor, _pct_str, badge) = &skills[i];
+            lines.push(format!(
+                "Most practiced: {} {} ({} tries • {})",
+                badge,
+                name,
+                *att,
+                pct_label(*att, *cor)
+            ));
+        }
+
+        if let Some((name, att, _cor, pct)) = strongest {
+            lines.push(format!(
+                "Strength: {} {} ({}% on {} tries)",
+                badge_for_pct_i32(pct),
+                name,
+                pct,
+                att
+            ));
+        }
+
+        if let Some((name, att, _cor, pct)) = focus {
+            lines.push(format!(
+                "Focus next: {} {} ({}% on {} tries)",
+                badge_for_pct_i32(pct),
+                name,
+                pct,
+                att
+            ));
+            lines.push(format!("Suggested quick practice (2 min): {}", plan_text(name)));
+        } else {
+            lines.push("Focus next: Balanced week (no clear weak spot with 10+ tries)".to_string());
+            lines.push("Suggested quick practice (2 min): Do 8 mixed questions and explain ONE answer out loud.".to_string());
+        }
+
+        lines.push("".to_string());
+        lines.push("Skill snapshot:".to_string());
+        for (name, att, cor, pct, badge) in skills.iter() {
+            lines.push(format!("• {} {} — {} tries, {} correct ({})", badge, name, att, cor, pct));
+        }
+
+        lines.push("".to_string());
+        lines.push("Parent note: We’re encouraging the student to explain ONE answer out loud to build reasoning, not just speed.".to_string());
+
+        lines.join("\n")
+    };
+
     let on_copy_weekly = {
-        let copied_toast = copied_toast.clone();
+        let copied_weekly_toast = copied_weekly_toast.clone();
         Callback::from(move |_| {
             let ok = copy_text_to_clipboard(&report_text);
             if ok {
-                copied_toast.set(true);
+                copied_weekly_toast.set(true);
+            }
+        })
+    };
+
+    let on_copy_teacher = {
+        let copied_teacher_toast = copied_teacher_toast.clone();
+        Callback::from(move |_| {
+            let ok = copy_text_to_clipboard(&teacher_note_text);
+            if ok {
+                copied_teacher_toast.set(true);
             }
         })
     };
@@ -688,6 +872,9 @@ fn parent_summary_panel() -> Html {
                     <div style="margin-top: 6px; opacity:.85;">
                         {format!("{} attempts • {} accuracy", week_attempts, week_pct)}
                     </div>
+                    <div style="margin-top: 6px; font-size: 13px; opacity:.75;">
+                        {"Badges: 🟢 strong • 🟡 improving • 🔴 focus next"}
+                    </div>
                 </div>
 
                 <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -699,18 +886,79 @@ fn parent_summary_panel() -> Html {
                         {"📋 Copy weekly report"}
                     </button>
 
+                    <button
+                        onclick={on_copy_teacher}
+                        style="padding:10px 12px; border-radius:10px; border:1px solid #222; background:#fff; cursor:pointer;"
+                        title="Copy a teacher-ready note you can paste into email, LMS, or a message"
+                    >
+                        {"📝 Copy teacher note"}
+                    </button>
+
                     {
-                        if *copied_toast {
+                        if *copied_weekly_toast {
                             html!{
                                 <div style="padding:8px 10px; border-radius: 999px; border:1px solid #e6e6e6; background: rgba(0,128,0,.08); font-weight:700;">
-                                    {"Copied ✅"}
+                                    {"Weekly copied ✅"}
                                 </div>
                             }
-                        } else {
-                            html!{}
-                        }
+                        } else { html!{} }
+                    }
+
+                    {
+                        if *copied_teacher_toast {
+                            html!{
+                                <div style="padding:8px 10px; border-radius: 999px; border:1px solid #e6e6e6; background: rgba(0,128,0,.08); font-weight:700;">
+                                    {"Teacher note copied ✅"}
+                                </div>
+                            }
+                        } else { html!{} }
                     }
                 </div>
+            </div>
+
+            <div style="margin-top: 12px; display:flex; gap:10px; flex-wrap:wrap;">
+                {
+                    if let Some(i) = most_practiced_idx {
+                        let (name, att, cor, _pct_str, badge) = &skills[i];
+                        html!{
+                            <div style="padding: 8px 10px; border-radius: 12px; border:1px solid #eee; background: rgba(0,0,0,.03);">
+                                <div style="font-weight:900;">{"🔥 Most practiced"}</div>
+                                <div style="margin-top:4px;">
+                                    {format!("{} {} ({} tries • {})", badge, name, *att, pct_label(*att, *cor))}
+                                </div>
+                            </div>
+                        }
+                    } else { html!{} }
+                }
+
+                {
+                    if let Some((name, att, _cor, pct)) = strongest {
+                        html!{
+                            <div style="padding: 8px 10px; border-radius: 12px; border:1px solid #eee; background: rgba(0,0,0,.03);">
+                                <div style="font-weight:900;">{"🏅 Strongest"}</div>
+                                <div style="margin-top:4px;">{format!("{} {} ({}% • {} tries)", badge_for_pct_i32(pct), name, pct, att)}</div>
+                            </div>
+                        }
+                    } else { html!{} }
+                }
+
+                {
+                    if let Some((name, att, _cor, pct)) = focus {
+                        html!{
+                            <div style="padding: 8px 10px; border-radius: 12px; border:1px solid #eee; background: rgba(255,165,0,.12);">
+                                <div style="font-weight:900;">{"🎯 Focus next"}</div>
+                                <div style="margin-top:4px;">{format!("{} {} ({}% • {} tries)", badge_for_pct_i32(pct), name, pct, att)}</div>
+                            </div>
+                        }
+                    } else {
+                        html!{
+                            <div style="padding: 8px 10px; border-radius: 12px; border:1px solid #eee; background: rgba(0,128,0,.10);">
+                                <div style="font-weight:900;">{"✅ Balanced week"}</div>
+                                <div style="margin-top:4px;">{"No clear weak spot (10+ tries) — nice!"}</div>
+                            </div>
+                        }
+                    }
+                }
             </div>
 
             <div style="margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid #eee; background: rgba(0,0,0,.02);">
@@ -757,37 +1005,37 @@ fn parent_summary_panel() -> Html {
                     </thead>
                     <tbody>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Addition"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.addition.accuracy()), "Addition")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.addition.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.addition.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.addition)}</td>
                         </tr>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Subtraction"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.subtraction.accuracy()), "Subtraction")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.subtraction.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.subtraction.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.subtraction)}</td>
                         </tr>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Multiplication"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.multiplication.accuracy()), "Multiplication")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.multiplication.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.multiplication.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.multiplication)}</td>
                         </tr>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Division"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.division.accuracy()), "Division")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.division.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.division.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.division)}</td>
                         </tr>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Word Problems"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.word.accuracy()), "Word Problems")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.word.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.word.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.word)}</td>
                         </tr>
                         <tr>
-                            <td style="padding:8px 6px; font-weight:700;">{"Mixed Skills"}</td>
+                            <td style="padding:8px 6px; font-weight:700;">{format!("{} {}", badge_for_accuracy_opt(totals.mixed.accuracy()), "Mixed Skills")}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.mixed.attempts}</td>
                             <td style="padding:8px 6px; text-align:right;">{totals.mixed.correct}</td>
                             <td style="padding:8px 6px; text-align:right;">{pct_label_from(&totals.mixed)}</td>
@@ -1148,7 +1396,7 @@ fn day_view(props: &DayViewProps) -> Html {
                                 }
                             </div>
                             <div style="margin-top: 10px; font-size: 13px; opacity:.75;">
-                                {"Ask the student to explain ONE answer out loud. That builds confidence + understanding."}
+                                {"Tip: After practice, ask the student to explain ONE answer out loud — what operation they chose and why."}
                             </div>
                         </div>
                     }
