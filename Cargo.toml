@@ -1,0 +1,33 @@
+[package]
+name = "the-numbers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+yew = { version = "0.22", features = ["csr"] }
+yew-router = "0.19"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+gloo-net = "0.6"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen = "0.2"
+gloo-storage = "0.3"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "Window",
+  "Storage",
+  "HtmlInputElement",
+  "HtmlSelectElement",
+
+  "AudioContext",
+  "AudioDestinationNode",
+  "AudioNode",
+
+  "OscillatorNode",
+  "GainNode",
+  "AudioParam",
+] }
+
+# NEW: random selection in WASM
+rand = "0.8"
+getrandom = { version = "0.2", features = ["js"] }

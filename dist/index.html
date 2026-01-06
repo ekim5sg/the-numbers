@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>The Numbers — 12 Days of Math</title>
+  <link rel="modulepreload" href="./the-numbers.js" crossorigin="anonymous" integrity="sha384-/Fr5HoDBgcmRrnzB0fzU2f2c3GuOXHLWM8ODHMxwyD9u6eOc+RNY2Df7WEzGboo7"><link rel="preload" href="./the-numbers_bg.wasm" crossorigin="anonymous" integrity="sha384-lhwIRxO2MXUiLgj32FbKqRn0ZtlyfhdVUMS+j9q5kJ0PTC3MDxbMbAMpqD2H7REc" as="fetch" type="application/wasm"></head>
+  <body>
+    <div id="app"></div>
+  
+<script type="module">
+import init, * as bindings from './the-numbers.js';
+const wasm = await init({ module_or_path: './the-numbers_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script></body>
+</html>
